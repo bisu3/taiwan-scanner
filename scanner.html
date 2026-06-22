@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>バーコード登録</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "Hiragino Sans", sans-serif; margin: 0; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  #reader { width: 100%; max-width: 480px; margin: 0 auto; }
+  #status { margin: 12px 0; padding: 10px 12px; border-radius: 8px; background: #eee; font-size: 15px; }
+  #status.ok { background: #d6f5e3; }
+  #status.ng { background: #fbe0e0; }
+  ul { list-style: none; padding: 0; margin: 12px 0; max-width: 480px; }
+  li { display: flex; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid #ddd; font-size: 14px; }
+  li .p { font-weight: 600; }
+</style>
+</head>
+<body>
+  <h1>バーコード登録（台湾用）</h1>
+  <div id="reader"></div>
+  <div id="status">カメラの使用を許可してください</div>
+  <ul id="history"></ul>
+
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <script>
+    // ★ Apps Scriptをデプロイして得た「ウェブアプリのURL(/exec)」をここに貼る
+    var EXEC_URL = "https://script.google.com/macros/s/AKfycbzZcoNdoSZOLGzhHHP7gSYnPHmH8V3SEI2B30KgQa8aaDZzjoq_GYpWAgRklH-ASXJa/exec";
+
+    var statusEl = document.getElementById('status');
+    var historyEl = document.getElementById('history');
+    var last = '', lastT = 0, count = 0;
+
+    function setStatus(msg, cls) {
+      statusEl.textContent = msg;
+      statusEl.className = cls || '';
+    }
+
+    function onScan(text) {
+      var now = Date.now();
+      if (text === last && now - lastT < 2500) return;  // 同じコードの連続読みを無視
+      last = text; lastT = now;
+      register(text);
+    }
+
+    function register(code) {
+      setStatus('登録中… ' + code, '');
+      var cbName = 'cb' + Date.now();
+      var s = document.createElement('script');
+      window[cbName] = function (res) {
+        delete window[cbName];
+        s.remove();
+        if (res && res.ok) {
+          addHistory(res.code, res.price);
+          var p = (res.price === null || res.price === undefined) ? '（価格未登録）' : 'NT$ ' + res.price;
+          setStatus('登録しました: ' + res.code + ' / ' + p, 'ok');
+          if (navigator.vibrate) navigator.vibrate(80);
+        } else {
+          setStatus('エラー: ' + ((res && res.error) || '不明'), 'ng');
+        }
+      };
+      s.onerror = function () { delete window[cbName]; setStatus('通信エラー（URLを確認）', 'ng'); };
+      s.src = EXEC_URL + '?code=' + encodeURIComponent(code) + '&callback=' + cbName;
+      document.body.appendChild(s);
+    }
+
+    function addHistory(code, price) {
+      count++;
+      var li = document.createElement('li');
+      var p = (price === null || price === undefined) ? '—' : 'NT$ ' + price;
+      li.innerHTML = '<span>' + count + '. ' + code + '</span><span class="p">' + p + '</span>';
+      historyEl.insertBefore(li, historyEl.firstChild);
+    }
+
+    var scanner = new Html5QrcodeScanner("reader", {
+      fps: 10,
+      qrbox: { width: 240, height: 240 },           // QR向けに正方形
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.CODE_128
+      ],
+      rememberLastUsedCamera: true
+    }, false);
+    scanner.render(onScan, function () {});         // 読み取り失敗のたびのエラーは無視
+    setStatus('スキャンしてください', '');
+  </script>
+</body>
+</html>
