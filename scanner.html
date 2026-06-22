@@ -30,7 +30,7 @@
 
     var statusEl = document.getElementById('status');
     var historyEl = document.getElementById('history');
-    var last = '', lastT = 0, count = 0;
+    var seen = {}, count = 0;   // 一度登録(または送信中)した管理番号を記録し、二重登録を防ぐ
 
     function setStatus(msg, cls) {
       statusEl.textContent = msg;
@@ -38,9 +38,11 @@
     }
 
     function onScan(text) {
-      var now = Date.now();
-      if (text === last && now - lastT < 2500) return;  // 同じコードの連続読みを無視
-      last = text; lastT = now;
+      if (seen[text]) {                       // 既に登録済み/送信中 → 写し続けても無視
+        setStatus('登録済み: ' + text, '');
+        return;
+      }
+      seen[text] = true;                      // 送信前に印を付け、連続読みの二重送信を防止
       register(text);
     }
 
@@ -57,10 +59,15 @@
           setStatus('登録しました: ' + res.code + ' / ' + p, 'ok');
           if (navigator.vibrate) navigator.vibrate(80);
         } else {
+          delete seen[code];                  // 失敗したら再スキャンで登録できるよう印を外す
           setStatus('エラー: ' + ((res && res.error) || '不明'), 'ng');
         }
       };
-      s.onerror = function () { delete window[cbName]; setStatus('通信エラー（URLを確認）', 'ng'); };
+      s.onerror = function () {
+        delete window[cbName];
+        delete seen[code];                      // 通信失敗時も再試行できるように
+        setStatus('通信エラー（URLを確認）', 'ng');
+      };
       s.src = EXEC_URL + '?code=' + encodeURIComponent(code) + '&callback=' + cbName;
       document.body.appendChild(s);
     }
