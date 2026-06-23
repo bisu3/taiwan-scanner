@@ -15,12 +15,25 @@
   ul { list-style: none; padding: 0; margin: 12px 0; max-width: 480px; }
   li { display: flex; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid #ddd; font-size: 14px; }
   li .p { font-weight: 600; }
+  li .it { color: #2a7; }
+  #itembar { max-width: 480px; margin: 12px auto; display: none; }
+  #itembar #itemfor { font-size: 13px; color: #888; margin-bottom: 4px; }
+  #itembar .row { display: flex; gap: 8px; }
+  #item { flex: 1; padding: 10px; font-size: 16px; border: 1px solid #bbb; border-radius: 8px; }
+  #save { padding: 10px 18px; font-size: 15px; border: 0; border-radius: 8px; background: #28a86a; color: #fff; font-weight: 600; }
 </style>
 </head>
 <body>
   <h1>バーコード登録（台湾用）</h1>
   <div id="reader"></div>
   <div id="status">カメラの使用を許可してください</div>
+  <div id="itembar">
+    <div id="itemfor"></div>
+    <div class="row">
+      <input id="item" type="text" placeholder="品名を入力" autocomplete="off" enterkeyhint="done">
+      <button id="save">保存</button>
+    </div>
+  </div>
   <ul id="history"></ul>
 
   <script src="https://unpkg.com/html5-qrcode"></script>
@@ -30,11 +43,28 @@
 
     var statusEl = document.getElementById('status');
     var historyEl = document.getElementById('history');
-    var seen = {}, count = 0;   // 一度登録(または送信中)した管理番号を記録し、二重登録を防ぐ
+    var itembar = document.getElementById('itembar');
+    var itemFor = document.getElementById('itemfor');
+    var itemInput = document.getElementById('item');
+    var seen = {}, count = 0;       // 登録済み(または送信中)の管理番号。二重登録を防ぐ
+    var liByCode = {};              // 管理番号 -> 履歴行(li)。品名を後から書き込むため
+    var currentCode = null;         // 今、品名入力の対象になっている管理番号
 
     function setStatus(msg, cls) {
       statusEl.textContent = msg;
       statusEl.className = cls || '';
+    }
+
+    // Apps Script(/exec)をJSONPで呼ぶ共通関数
+    function jsonp(params, onOk, onErr) {
+      var cbName = 'cb' + Date.now() + Math.floor(Math.random() * 1000);
+      var s = document.createElement('script');
+      var q = 'callback=' + cbName;
+      for (var k in params) q += '&' + k + '=' + encodeURIComponent(params[k]);
+      window[cbName] = function (res) { delete window[cbName]; s.remove(); onOk(res); };
+      s.onerror = function () { delete window[cbName]; s.remove(); if (onErr) onErr(); };
+      s.src = EXEC_URL + '?' + q;
+      document.body.appendChild(s);
     }
 
     function onScan(text) {
@@ -48,37 +78,63 @@
 
     function register(code) {
       setStatus('登録中… ' + code, '');
-      var cbName = 'cb' + Date.now();
-      var s = document.createElement('script');
-      window[cbName] = function (res) {
-        delete window[cbName];
-        s.remove();
+      jsonp({ code: code }, function (res) {
         if (res && res.ok) {
           addHistory(res.code, res.price);
           var p = (res.price === null || res.price === undefined) ? '（価格未登録）' : 'NT$ ' + res.price;
-          setStatus('登録しました: ' + res.code + ' / ' + p, 'ok');
+          setStatus('登録: ' + res.code + ' / ' + p + ' ― 品名を入力できます', 'ok');
           if (navigator.vibrate) navigator.vibrate(80);
+          openItemInput(res.code);            // 品名入力欄を出して対象をこのコードに
         } else {
           delete seen[code];                  // 失敗したら再スキャンで登録できるよう印を外す
           setStatus('エラー: ' + ((res && res.error) || '不明'), 'ng');
         }
-      };
-      s.onerror = function () {
-        delete window[cbName];
-        delete seen[code];                      // 通信失敗時も再試行できるように
+      }, function () {
+        delete seen[code];                    // 通信失敗時も再試行できるように
         setStatus('通信エラー（URLを確認）', 'ng');
-      };
-      s.src = EXEC_URL + '?code=' + encodeURIComponent(code) + '&callback=' + cbName;
-      document.body.appendChild(s);
+      });
     }
 
     function addHistory(code, price) {
       count++;
       var li = document.createElement('li');
       var p = (price === null || price === undefined) ? '—' : 'NT$ ' + price;
-      li.innerHTML = '<span>' + count + '. ' + code + '</span><span class="p">' + p + '</span>';
+      li.innerHTML = '<span>' + count + '. ' + code + ' <span class="it"></span></span>' +
+                     '<span class="p">' + p + '</span>';
       historyEl.insertBefore(li, historyEl.firstChild);
+      liByCode[code] = li;
     }
+
+    function openItemInput(code) {
+      currentCode = code;
+      itemFor.textContent = code + ' の品名';
+      itemInput.value = '';
+      itembar.style.display = 'block';
+      itemInput.focus();
+    }
+
+    function saveItem() {
+      var code = currentCode;
+      var name = itemInput.value.trim();
+      if (!code) return;
+      if (!name) { setStatus('品名が空です', 'ng'); return; }
+      setStatus('品名を保存中… ' + code, '');
+      jsonp({ code: code, item: name }, function (res) {
+        if (res && res.ok) {
+          var li = liByCode[code];
+          if (li) li.querySelector('.it').textContent = '／ ' + name;
+          setStatus('品名を保存: ' + code + ' / ' + name, 'ok');
+          itemInput.value = '';
+        } else {
+          setStatus('品名エラー: ' + ((res && res.error) || '不明'), 'ng');
+        }
+      }, function () { setStatus('通信エラー（品名）', 'ng'); });
+    }
+
+    document.getElementById('save').addEventListener('click', saveItem);
+    itemInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); saveItem(); }
+    });
 
     var scanner = new Html5QrcodeScanner("reader", {
       fps: 10,
