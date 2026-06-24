@@ -2,43 +2,74 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>バーコード登録</title>
 <style>
   :root { color-scheme: light dark; }
-  body { font-family: -apple-system, "Hiragino Sans", sans-serif; margin: 0; padding: 16px; }
-  h1 { font-size: 18px; margin: 0 0 12px; }
-  #reader { width: 100%; max-width: 480px; margin: 0 auto; }
-  #status { margin: 12px 0; padding: 10px 12px; border-radius: 8px; background: #eee; font-size: 15px; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, "Hiragino Sans", sans-serif;
+    display: flex; flex-direction: column;
+    height: 100dvh;
+    padding: 8px calc(8px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left));
+    gap: 8px;
+  }
+
+  /* カメラ：正方形でスッキリ、画面幅にフィット */
+  #reader { width: 100%; max-width: 360px; aspect-ratio: 1 / 1; margin: 0 auto;
+            background: #000; border-radius: 14px; overflow: hidden; position: relative; }
+  #reader video { width: 100% !important; height: 100% !important; object-fit: cover; display: block; }
+  #reader img { display: none; }                 /* ライブラリ既定のロゴ等を隠す */
+  #startbtn { display: none; width: 100%; max-width: 360px; margin: 0 auto;
+              padding: 14px; font-size: 16px; font-weight: 600; border: 0; border-radius: 12px;
+              background: #2563eb; color: #fff; }
+
+  #status { padding: 10px 12px; border-radius: 10px; background: #eee; font-size: 14px; text-align: center; }
   #status.ok { background: #d6f5e3; }
   #status.ng { background: #fbe0e0; }
-  ul { list-style: none; padding: 0; margin: 12px 0; max-width: 480px; }
-  li { display: flex; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid #ddd; font-size: 14px; }
-  li .p { font-weight: 600; }
-  li .it { color: #2a7; }
-  #itembar { max-width: 480px; margin: 12px auto; display: none; }
-  #itembar #itemfor { font-size: 13px; color: #888; margin-bottom: 4px; }
-  #itembar .row { display: flex; gap: 8px; }
-  #item { flex: 1; padding: 10px; font-size: 16px; border: 1px solid #bbb; border-radius: 8px; }
-  #save { padding: 10px 18px; font-size: 15px; border: 0; border-radius: 8px; background: #28a86a; color: #fff; font-weight: 600; }
+
+  /* 品名 / メモ 入力 */
+  #itembar { display: none; }
+  #itembar .for { font-size: 12px; color: #888; margin: 0 2px 4px; }
+  #itembar .fields { display: flex; flex-direction: column; gap: 6px; }
+  #itembar .line { display: flex; gap: 6px; }
+  #itembar input { flex: 1; padding: 11px; font-size: 16px; border: 1px solid #bbb; border-radius: 10px; min-width: 0; }
+  #save { padding: 0 18px; font-size: 15px; font-weight: 600; border: 0; border-radius: 10px; background: #28a86a; color: #fff; white-space: nowrap; }
+
+  /* 履歴：残りスペースをスクロール */
+  #history { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+             list-style: none; padding: 0; margin: 0; }
+  #history li { display: flex; justify-content: space-between; gap: 8px;
+                padding: 8px 10px; border-bottom: 1px solid #ddd; font-size: 13px; }
+  #history li .c { overflow: hidden; text-overflow: ellipsis; }
+  #history li .it { color: #2a8f5e; }
+  #history li .p { font-weight: 600; white-space: nowrap; }
 </style>
 </head>
 <body>
-  <h1>バーコード登録（台湾用）</h1>
+  <div id="status">カメラを準備中…</div>
   <div id="reader"></div>
-  <div id="status">カメラの使用を許可してください</div>
+  <button id="startbtn">カメラ開始</button>
+
   <div id="itembar">
-    <div id="itemfor"></div>
-    <div class="row">
-      <input id="item" type="text" placeholder="品名を入力" autocomplete="off" enterkeyhint="done">
-      <button id="save">保存</button>
+    <div class="for" id="itemfor"></div>
+    <div class="fields">
+      <div class="line">
+        <input id="item" type="text" placeholder="品名 (Item)" autocomplete="off" enterkeyhint="next">
+      </div>
+      <div class="line">
+        <input id="note" type="text" placeholder="メモ (Note)" autocomplete="off" enterkeyhint="done">
+        <button id="save">保存</button>
+      </div>
     </div>
   </div>
+
   <ul id="history"></ul>
 
   <script src="https://unpkg.com/html5-qrcode"></script>
   <script>
-    // ★ Apps Scriptをデプロイして得た「ウェブアプリのURL(/exec)」をここに貼る
+    // ★ Apps Scriptをデプロイして得た「ウェブアプリのURL(/exec)」
     var EXEC_URL = "https://script.google.com/macros/s/AKfycbzZcoNdoSZOLGzhHHP7gSYnPHmH8V3SEI2B30KgQa8aaDZzjoq_GYpWAgRklH-ASXJa/exec";
 
     var statusEl = document.getElementById('status');
@@ -46,14 +77,14 @@
     var itembar = document.getElementById('itembar');
     var itemFor = document.getElementById('itemfor');
     var itemInput = document.getElementById('item');
-    var seen = {}, count = 0;       // 登録済み(または送信中)の管理番号。二重登録を防ぐ
-    var liByCode = {};              // 管理番号 -> 履歴行(li)。品名を後から書き込むため
-    var currentCode = null;         // 今、品名入力の対象になっている管理番号
+    var noteInput = document.getElementById('note');
+    var startBtn = document.getElementById('startbtn');
 
-    function setStatus(msg, cls) {
-      statusEl.textContent = msg;
-      statusEl.className = cls || '';
-    }
+    var seen = {}, count = 0;       // 登録済み(または送信中)の管理番号。二重登録を防ぐ
+    var liByCode = {};              // 管理番号 -> 履歴行(li)
+    var currentCode = null;         // 今、品名/メモ入力の対象になっている管理番号
+
+    function setStatus(msg, cls) { statusEl.textContent = msg; statusEl.className = cls || ''; }
 
     // Apps Script(/exec)をJSONPで呼ぶ共通関数
     function jsonp(params, onOk, onErr) {
@@ -68,11 +99,8 @@
     }
 
     function onScan(text) {
-      if (seen[text]) {                       // 既に登録済み/送信中 → 写し続けても無視
-        setStatus('登録済み: ' + text, '');
-        return;
-      }
-      seen[text] = true;                      // 送信前に印を付け、連続読みの二重送信を防止
+      if (seen[text]) { setStatus('登録済み: ' + text, ''); return; }  // 写し続けても無視
+      seen[text] = true;
       register(text);
     }
 
@@ -82,15 +110,15 @@
         if (res && res.ok) {
           addHistory(res.code, res.price);
           var p = (res.price === null || res.price === undefined) ? '（価格未登録）' : 'NT$ ' + res.price;
-          setStatus('登録: ' + res.code + ' / ' + p + ' ― 品名を入力できます', 'ok');
+          setStatus('登録: ' + res.code + ' / ' + p + ' ― 品名/メモを入力できます', 'ok');
           if (navigator.vibrate) navigator.vibrate(80);
-          openItemInput(res.code);            // 品名入力欄を出して対象をこのコードに
+          openInput(res.code);
         } else {
-          delete seen[code];                  // 失敗したら再スキャンで登録できるよう印を外す
+          delete seen[code];
           setStatus('エラー: ' + ((res && res.error) || '不明'), 'ng');
         }
       }, function () {
-        delete seen[code];                    // 通信失敗時も再試行できるように
+        delete seen[code];
         setStatus('通信エラー（URLを確認）', 'ng');
       });
     }
@@ -99,54 +127,67 @@
       count++;
       var li = document.createElement('li');
       var p = (price === null || price === undefined) ? '—' : 'NT$ ' + price;
-      li.innerHTML = '<span>' + count + '. ' + code + ' <span class="it"></span></span>' +
+      li.innerHTML = '<span class="c">' + count + '. ' + code + ' <span class="it"></span></span>' +
                      '<span class="p">' + p + '</span>';
       historyEl.insertBefore(li, historyEl.firstChild);
       liByCode[code] = li;
     }
 
-    function openItemInput(code) {
+    function openInput(code) {
       currentCode = code;
-      itemFor.textContent = code + ' の品名';
-      itemInput.value = '';
+      itemFor.textContent = code + ' の品名・メモ';
+      itemInput.value = ''; noteInput.value = '';
       itembar.style.display = 'block';
       itemInput.focus();
     }
 
-    function saveItem() {
+    function saveFields() {
       var code = currentCode;
-      var name = itemInput.value.trim();
       if (!code) return;
-      if (!name) { setStatus('品名が空です', 'ng'); return; }
-      setStatus('品名を保存中… ' + code, '');
-      jsonp({ code: code, item: name }, function (res) {
+      var item = itemInput.value.trim();
+      var note = noteInput.value.trim();
+      if (!item && !note) { setStatus('品名・メモが空です', 'ng'); return; }
+      var params = { code: code };
+      if (item) params.item = item;             // 空欄は送らない＝既存値を消さない
+      if (note) params.note = note;
+      setStatus('保存中… ' + code, '');
+      jsonp(params, function (res) {
         if (res && res.ok) {
           var li = liByCode[code];
-          if (li) li.querySelector('.it').textContent = '／ ' + name;
-          setStatus('品名を保存: ' + code + ' / ' + name, 'ok');
-          itemInput.value = '';
+          if (li) {
+            var t = [];
+            if (res.item) t.push(res.item);
+            if (res.note) t.push('(' + res.note + ')');
+            li.querySelector('.it').textContent = t.length ? '／ ' + t.join(' ') : '';
+          }
+          setStatus('保存しました: ' + code, 'ok');
         } else {
-          setStatus('品名エラー: ' + ((res && res.error) || '不明'), 'ng');
+          setStatus('保存エラー: ' + ((res && res.error) || '不明'), 'ng');
         }
-      }, function () { setStatus('通信エラー（品名）', 'ng'); });
+      }, function () { setStatus('通信エラー（保存）', 'ng'); });
     }
 
-    document.getElementById('save').addEventListener('click', saveItem);
-    itemInput.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); saveItem(); }
-    });
+    document.getElementById('save').addEventListener('click', saveFields);
+    // 品名でEnter→メモへ、メモでEnter→保存
+    itemInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); noteInput.focus(); } });
+    noteInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); saveFields(); } });
 
-    var scanner = new Html5QrcodeScanner("reader", {
+    // ===== カメラ =====
+    var html5 = new Html5Qrcode("reader", {
+      formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_128],
+      verbose: false
+    });
+    var camConfig = {
       fps: 10,
-      qrbox: { width: 240, height: 240 },           // QR向けに正方形
-      formatsToSupport: [
-        Html5QrcodeSupportedFormats.QR_CODE,
-        Html5QrcodeSupportedFormats.CODE_128
-      ],
-      rememberLastUsedCamera: true
-    }, false);
-    scanner.render(onScan, function () {});         // 読み取り失敗のたびのエラーは無視
-    setStatus('スキャンしてください', '');
+      qrbox: function (vw, vh) { var m = Math.floor(Math.min(vw, vh) * 0.8); return { width: m, height: m }; }
+    };
+    function startCamera() {
+      html5.start({ facingMode: "environment" }, camConfig, onScan, function () {})
+        .then(function () { startBtn.style.display = 'none'; setStatus('スキャンしてください', ''); })
+        .catch(function () { startBtn.style.display = 'block'; setStatus('「カメラ開始」を押してください', ''); });
+    }
+    startBtn.addEventListener('click', startCamera);
+    startCamera();   // 自動起動。iOS等でブロックされたらボタンで起動
   </script>
 </body>
 </html>
